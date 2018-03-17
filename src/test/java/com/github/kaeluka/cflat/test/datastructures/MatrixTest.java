@@ -76,7 +76,7 @@ public class MatrixTest {
 
     @Test
     public void initThenGetColMajor() throws Exception {
-        final int SIZE = 500;
+        final int SIZE = 50;
         Matrix matr = this.seqSupplier.get();
 
         for (int j=0; j<SIZE; ++j) {

@@ -1,12 +1,12 @@
 package com.github.kaeluka.cflat;
 
 import com.github.kaeluka.cflat.annotations.Cflat;
+import com.github.kaeluka.cflat.storage.AssertionStorage;
 import com.github.kaeluka.cflat.storage.Storage;
 
 import javax.annotation.Nonnull;
 import java.lang.reflect.Array;
 import java.util.AbstractList;
-import java.util.ArrayList;
 import java.util.Iterator;
 
 @SuppressWarnings("unchecked")
@@ -16,21 +16,33 @@ public class Sequence<T> extends AbstractList<T> implements Iterable<T>, Cloneab
     private SequenceIdx tail = new SequenceIdx();
 
     public Sequence(final Storage<T> storage) {
-        ArrayList x;
-        this.storage = storage;
         tail.next_nth(storage.maxIdx());
+        this.storage =
+                AssertionStorage.withAssertion(
+                        storage, this::check);
+//        this.storage = storage;
+    }
+
+    public void check(int begin, int end, Storage<T> upd) {
+        if (end-1 >= this.size()) {
+            throw new IndexOutOfBoundsException("list index "
+                    +(end-1)+" too large for list of length "
+                    +this.size());
+        }
+
     }
 
     @Override
     public boolean add(final T x) {
-        storage = storage.set(tail.ok(), x);
+        final int oldTail = tail.ok();
         tail.next();
+        storage = storage.set(oldTail, x);
         return true;
     }
 
     @Override
     public boolean remove(final Object o) {
-        int i = storage.find((T) o, tail.ok());
+        int i = storage.findFirst((T) o, tail.ok());
         if (i >= 0) {
             remove(i);
 
@@ -48,12 +60,12 @@ public class Sequence<T> extends AbstractList<T> implements Iterable<T>, Cloneab
 
     @Override
     public int indexOf(Object x) {
-        return storage.find((T)x, -1);
+        return storage.findFirst((T)x, -1);
     }
 
     @Override
     public boolean contains(final Object o) {
-        return storage.find((T)o, -1) != -1;
+        return storage.findFirst((T)o, -1) != -1;
     }
 
     @Override
@@ -74,15 +86,15 @@ public class Sequence<T> extends AbstractList<T> implements Iterable<T>, Cloneab
 
     @Override
     public void add(final int index, final T element) {
-        storage = storage.moveRange(index,index+1, size() - index);
-        storage = storage.set(index, element);
         tail.next();
+        storage = storage.moveRange(index,index+1, size() - index - 1);
+        storage = storage.set(index, element);
     }
 
     @Override
     public T remove(final int index) {
         T ret = get(index);
-        storage.moveSubtree(index+1, SequenceIdx.shape, index);
+        storage = storage.moveRange(index+1, index, size() - index - 1);
         tail.next_back();
         return ret;
     }
@@ -108,7 +120,7 @@ public class Sequence<T> extends AbstractList<T> implements Iterable<T>, Cloneab
         return toArray(ret);
     }
 
-    @Override
+    @SuppressWarnings("MethodDoesntCallSuperMethod") @Override
     protected Object clone() throws CloneNotSupportedException {
         final Sequence<T> sequence = new Sequence<>(storage.copy());
         sequence.tail = tail.copy();

@@ -31,7 +31,7 @@ public class MapFlat<K,V> extends AbstractMap<K,V> {
     public boolean containsValue(Object value) {
         final Iterator<Integer> indices = data.nonNullIndices();
         while (indices.hasNext()) {
-            indices.next();
+            final Object wat = data.get(indices.next());
             if (indices.hasNext()) {
                 final Integer valIdx = indices.next();
                 final Object curVal = data.get(valIdx);

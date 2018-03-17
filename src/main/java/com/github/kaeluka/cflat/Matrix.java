@@ -1,6 +1,8 @@
 package com.github.kaeluka.cflat;
 
 import com.github.kaeluka.cflat.annotations.Cflat;
+import com.github.kaeluka.cflat.storage.NestedAssertionStorage;
+import com.github.kaeluka.cflat.storage.NestedStorage;
 import com.github.kaeluka.cflat.storage.Storage;
 import com.github.kaeluka.cflat.util.Mutable;
 
@@ -10,26 +12,52 @@ import java.util.function.DoubleSupplier;
 public class Matrix {
     private final int rows;
     private final int cols;
-    public final Storage<Storage<Double>> storage;
+    public final NestedStorage<Double> storage;
 
-    public Matrix(final int rows, final int cols, final Storage<Storage<Double>> storage) {
+    public Matrix(final int rows,
+                  final int cols,
+                  final NestedStorage<Double> storage) {
         assert(storage != null);
-        this.storage = storage;
         this.rows = rows;
         this.cols = cols;
+        this.storage = NestedAssertionStorage
+                .withAssertion(storage, this::check);
     }
 
-    public int getRows() {
-        return this.rows;
+    public int getRows() { return this.rows; }
+
+    public int getCols() { return this.cols; }
+
+    public Storage<Double> getRow(final int row) {
+        checkRow(row);
+        return storage.get(row);
     }
 
-    public int getCols() {
-        return this.cols;
+    private void check(int rowstart, int rowend,
+                       int colstart, int colend,
+                       NestedStorage<Double> upd) {
+        if (rowend-1 >= rows) {
+            throw new IndexOutOfBoundsException("row index "+(rowend -1)
+                    +" is too large for matrix with "+rows+" rows");
+        }
+        if (colend-1 >= cols) {
+            throw new IndexOutOfBoundsException("col index "+(colend -1)
+                    +" is too large for matrix with "+cols+" cols");
+        }
     }
 
-    public Matrix initialize(final int rows,
-                           final int cols,
-                           DoubleSupplier f) {
+    private void checkRow(final int row) {
+        if (this.getClass().desiredAssertionStatus() && row >= rows) {
+            throw new IndexOutOfBoundsException("row index "+row+" access " +
+                    "illegal, matrix has only "+rows+" rows");
+        }
+    }
+
+    public Storage<Double> getCol(final int col) {
+        return storage.getCol(col);
+    }
+
+    public Matrix initialize(DoubleSupplier f) {
         Matrix ret = this;
         for (int row=0; row<rows; ++row) {
             for (int col=0; col<cols; ++col) {
@@ -42,7 +70,7 @@ public class Matrix {
     public static Matrix from(final int rows,
                                 final int cols,
                                 DoubleSupplier f,
-                                Storage<Storage<Double>> st) {
+                                NestedStorage<Double> st) {
         Matrix m = new Matrix(rows, cols, st);
         for (int row=0; row<rows; ++row) {
             for (int col=0; col<cols; ++col) {
@@ -63,39 +91,68 @@ public class Matrix {
         }
     }
 
-    public Matrix put(int i, int j, double val) {
-        storage.get(i).set(j, val);
+    public Matrix put(int row, int col, double val) {
+        storage
+                .get(row)
+                .set(col, val);
         return this;
     }
 
     public Matrix multiply(final double x) {
-        Matrix res = new Matrix(this.rows, this.cols, this.storage.emptyCopy());
+        Matrix res = new Matrix(
+                this.rows,
+                this.cols,
+                (NestedStorage<Double>) this.storage.emptyCopy());
         this.storage.foreachNonNull(row ->
-                this.storage.get(row).foreachNonNull(col ->
+                this.storage.foreachColNonNull(col ->
                         res.put(row, col, this.get(row, col)*x))
         );
         return res;
     }
 
+    private static double dot(final Storage<Double> a, final Storage<Double> b) {
+        final int max = Math.max(a.maxIdx(), b.maxIdx());
+        System.out.println("=====");
+        for (int i = 0; i < a.maxIdx(); i++) {
+            final Double v = a.has(i) ? a.get(i) : 0.0;
+            System.out.print(v+" ");
+        }
+        System.out.println(" * ");
+        for (int i = 0; i < max; i++) {
+            final Double v = b.has(i) ? b.get(i) : 0.0;
+            System.out.print(v+" ");
+        }
+        System.out.println("");
+
+        final Mutable<Double> ret = new Mutable<>(0.0);
+        a.joinInner(b, (x, y) -> ret.x += x*y);
+        System.out.println(" = "+ret.x);
+        return ret.x;
+    }
+
     public Matrix multiply(Matrix other) {
-        Matrix res = new Matrix(this.rows, other.cols, this.storage.emptyCopy());
+        Matrix res = new Matrix(
+                this.rows,
+                other.cols,
+                (NestedStorage<Double>) this.storage.emptyCopy());
         if (this.cols != other.rows) {
             throw new IllegalArgumentException("matrix dimensions don't match!");
         }
         this.storage.foreachNonNull(i -> {
-            other.storage.foreachNonNull(j -> {
-                Mutable<Double> cell = new Mutable<>(0.0);
-                this.storage.get(i).foreachNonNull(k -> {
-                    cell.x += this.get(i, k) * other.get(k, j);
-                });
-                res.put(i, j, cell.x);
+            other.storage.foreachColNonNull(j -> {
+                res.put(i,j, dot(
+                        getRow(i),
+                        other.getCol(j)));
             });
         });
         return res;
     }
 
     public Matrix transpose() {
-        final Matrix ret = new Matrix(this.cols, this.rows, storage.emptyCopy());
+        final Matrix ret = new Matrix(
+                this.cols,
+                this.rows,
+                (NestedStorage<Double>) storage.emptyCopy());
         storage.foreachNonNull(row ->
                 storage.get(row).foreachNonNull(col ->
                         ret.put(col, row, this.get(row, col))));
@@ -125,7 +182,7 @@ public class Matrix {
     public Matrix[] LUDecomposition2() {
         assert(rows == cols);
         final int N = rows;
-        Matrix L = Matrix.identity(N, this.storage.emptyCopy());
+        Matrix L = Matrix.identity(N, (NestedStorage<Double>) this.storage.emptyCopy());
         Matrix U = this.copy();
 
         for (int n=0; n<N-1; ++n) {
@@ -145,7 +202,9 @@ public class Matrix {
     public Matrix[] LUDecomposition() {
         assert(rows == cols);
         final int N = rows;
-        Matrix L = Matrix.identity(N, this.storage.emptyCopy());
+        Matrix L = Matrix.identity(
+                N,
+                (NestedStorage<Double>) storage.emptyCopy());
         Matrix U = this.copy();
 
         for (int n=0; n<N-1; ++n) {
@@ -171,9 +230,11 @@ public class Matrix {
                 this.storage;
     }
 
-    public static Matrix identity(final int N, final Storage<Storage<Double>> st) {
+    public static Matrix identity(final int N, final NestedStorage<Double> st) {
         final Matrix ret = new Matrix(N, N, st);
+        System.out.println("identity("+N+")");
         for (int i=0; i<N; ++i) {
+            System.out.println("i=" + i);
             ret.put(i,i, 1);
         }
         return ret;
@@ -207,6 +268,6 @@ public class Matrix {
     }
 
     public Matrix copy() {
-        return new Matrix(rows, cols, storage.copy());
+        return new Matrix(rows, cols, storage.copyNested());
     }
 }

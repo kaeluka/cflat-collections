@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.github.kaeluka</groupId>
-    <artifactId>cflat-test</artifactId>
+    <artifactId>cflat-collections</artifactId>
     <version>0.1.0-SNAPSHOT</version>
 
     <dependencies>

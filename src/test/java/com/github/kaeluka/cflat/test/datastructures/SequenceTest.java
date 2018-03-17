@@ -1,7 +1,8 @@
 package com.github.kaeluka.cflat.test.datastructures;
 
 import com.github.kaeluka.cflat.Sequence;
-import com.github.kaeluka.cflat.storage.*;
+import com.github.kaeluka.cflat.storage.AssertionStorage;
+import com.github.kaeluka.cflat.storage.Storage;
 import com.github.kaeluka.cflat.util.NamedSupplier;
 import com.github.kaeluka.cflat.util.Storages;
 import org.junit.Test;
@@ -13,8 +14,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.Supplier;
 
-import com.github.kaeluka.cflat.SequenceIdx;
-
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 
@@ -22,22 +21,23 @@ import static org.hamcrest.Matchers.is;
 public class SequenceTest {
 
     @Parameterized.Parameter()
-    public Supplier<Sequence<Object>> seqSupplier;
+    public Supplier<Storage<Integer>> storageSupplier;
+
+    private Sequence<Integer> mkSequence() {
+        return new Sequence<>(storageSupplier.get());
+    }
+
 
     @SuppressWarnings("unchecked")
     @Parameterized.Parameters(name="{0}")
-    public static Collection<Supplier<Sequence<Object>>> storages() {
-        final ArrayList<Supplier<Sequence<Object>>> ret = new ArrayList<>();
-        for (final Supplier<Storage> s : Storages.genericStorages()) {
-            ret.add(new NamedSupplier<Sequence<Object>>(() -> new Sequence<Object>(s.get()), "Sequence("+s+")"));
-        }
-        return ret;
+    public static Collection<Supplier<Storage>> storages() {
+        return Storages.genericStorages();
     }
 
     @Test
     public void addFrontThenGet() throws Exception {
         final int ADD_N = 10;
-        final Sequence<Object> seq = this.seqSupplier.get();
+        final Sequence<Integer> seq = this.mkSequence();
 
         for (int i=0; i<ADD_N; ++i) {
             seq.add(0, i);
@@ -47,9 +47,41 @@ public class SequenceTest {
         }
     }
 
+    // build a sequence that can only contain even numbers
+    // and check that the exception handling works
+    @Test
+    public void assertionsTest() {
+        class UnevenNumberException extends RuntimeException {}
+        final Storage<Integer> st = storageSupplier.get();
+        final Storage<Integer> ast =
+                AssertionStorage.withAssertion(st,
+                (start, end, upd) -> {
+                    for (int i = start; i < end; i++) {
+                        if (upd.get(i) % 2 != 0) {
+                            throw new UnevenNumberException();
+                        }
+                    }
+                });
+        final Sequence<Integer> seq = new Sequence<>(ast);
+
+        for (int i = 0; i < 10; i++) {
+            seq.add(i*2);
+        }
+
+        try {
+            seq.add(1);
+        } catch (UnevenNumberException e) {
+            // we expected this!
+            return;
+        }
+
+        throw new AssertionError("no UnevenNumberException was thrown!");
+
+    }
+
     @Test
     public void indexOfTest() {
-        final List<Object> seq = this.seqSupplier.get();
+        final List<Integer> seq = this.mkSequence();
 
         final int ADD_N = 100;
         for (int i = 0; i < ADD_N; i++) {
@@ -69,7 +101,7 @@ public class SequenceTest {
     @Test
     public void addThenGet() throws Exception {
         final int ADD_N = 50000;
-        final List<Object> seq = this.seqSupplier.get();
+        final List<Integer> seq = this.mkSequence();
 
         for (int i=0; i<ADD_N; ++i) {
             seq.add(i);
@@ -83,7 +115,7 @@ public class SequenceTest {
     @Test
     public void addThenRemoveFromStart() throws Exception {
         final int ADD_N = 500;
-        final List<Object> seq = seqSupplier.get();
+        final List<Integer> seq = mkSequence();
         for (int i=0; i<ADD_N; ++i) {
             seq.add(i);
         }
@@ -96,7 +128,7 @@ public class SequenceTest {
     @Test
     public void addThenRemoveFromEnd() throws Exception {
         final int ADD_N = 500;
-        final List<Object> seq = seqSupplier.get();
+        final List<Integer> seq = mkSequence();
         for (int i=0; i<ADD_N; ++i) {
             seq.add(i);
         }

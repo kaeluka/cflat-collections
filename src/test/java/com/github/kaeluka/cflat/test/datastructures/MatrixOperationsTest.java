@@ -2,14 +2,13 @@ package com.github.kaeluka.cflat.test.datastructures;
 
 import com.github.kaeluka.cflat.Matrix;
 import com.github.kaeluka.cflat.NativeMatrix;
-import com.github.kaeluka.cflat.annotations.Cflat;
-import com.github.kaeluka.cflat.storage.*;
-import com.github.kaeluka.cflat.util.NamedSupplier;
+import com.github.kaeluka.cflat.Sequence;
+import com.github.kaeluka.cflat.storage.NestedStorage;
+import com.github.kaeluka.cflat.storage.Storage;
 import com.github.kaeluka.cflat.util.Storages;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
-import scala.Int;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -22,20 +21,15 @@ import static org.junit.Assert.assertThat;
 @RunWith(Parameterized.class)
 public class MatrixOperationsTest {
     @Parameterized.Parameter()
-    public Supplier<Matrix> matrixSupplier;
+    public Supplier<NestedStorage<Double>> mkStorage;
 
     private static int M = 2;
     private static int N = 3;
 
     @SuppressWarnings("unchecked")
     @Parameterized.Parameters(name="{0}")
-    public static Collection<Supplier<Matrix>> storages() {
-        final ArrayList<Supplier<Matrix>> ret = new ArrayList<>();
-        for (final Supplier<Storage> s : Storages.genericStorages()) {
-            ret.add(new NamedSupplier<>(() -> new Matrix(M, N, new Storage2D(s.get(), s.get())), "Matrix(" + s + ")"));
-        }
-        ret.add(new NamedSupplier<>(() -> new Matrix(M, N, SparseStorage.getFor(SparseStorage.USAGE.SIZE)), "CSR"));
-        return ret;
+    public static Collection<Supplier<NestedStorage<Double>>> storages() {
+        return Storages.nestedStorages();
     }
 
     @Test
@@ -44,8 +38,7 @@ public class MatrixOperationsTest {
         final int N = 3;
 
         final AtomicInteger seq = new AtomicInteger(1);
-        final Matrix A = Matrix.from(M, N, seq::getAndIncrement,
-                new Storage2D<>(new ArrayStorage<>(), new ArrayStorage<>()));
+        final Matrix A = Matrix.from(M, N, seq::getAndIncrement, mkStorage.get());
         final Matrix A_x = A.multiply(2);
         assertThat(A_x.get(0,0), is(2.0));
         assertThat(A_x.get(0,1), is(4.0));
@@ -58,25 +51,33 @@ public class MatrixOperationsTest {
     @Test
     public void identity_mult() {
         final AtomicInteger seq = new AtomicInteger(1);
-        final Matrix A = Matrix.from(2, 3, seq::getAndIncrement,
-                new Storage2D<>(new ArrayStorage<>(), new ArrayStorage<>()));
-        final Matrix I = Matrix.identity(3,
-                new Storage2D<>(new ArrayStorage<>(), new ArrayStorage<>()));
+        final Matrix A = Matrix.from(2, 3, seq::getAndIncrement, mkStorage.get());
+        final Matrix I = Matrix.identity(3, mkStorage.get());
 
         final Matrix A_I = A.multiply(I);
-        assertTrue(A.equalTo(A.multiply(I)));
-        assertTrue(I.equalTo(I.multiply(I)));
+        assertTrue("must equal:\n" +
+                "A=\n"+A.pretty()+"\n" +
+                "A*I=\n"+ A_I.pretty(), A.equalTo(A_I));
+//        assertTrue(I.equalTo(I.multiply(I)));
+    }
+
+    @Test
+    public void identity_square() {
+        final Matrix I = Matrix.identity(3, mkStorage.get());
+        final Matrix I2 = I.multiply(I);
+        assertTrue(I.equalTo(I2, 0.00001));
     }
 
     @Test
     public void A_times_B() {
 
         final AtomicInteger seq = new AtomicInteger(1);
-        final Matrix A = matrixSupplier.get()
-                .initialize(M, N, seq::getAndIncrement);
-        final Matrix B = matrixSupplier.get()
-                .transpose()
-                .initialize(N, M, seq::getAndIncrement);
+        final Matrix A = new Matrix(M, N, mkStorage.get())
+                .initialize(seq::getAndIncrement);
+        final Matrix B = new Matrix(N, M, mkStorage.get())
+                .initialize(seq::getAndIncrement);
+
+        System.out.println(A.pretty()+"\n * \n"+B.pretty());
 
 //        final Matrix A = Matrix.from(2, 3, seq::getAndIncrement,
 //                new Storage2D<>(new ArrayStorage<>(), new ArrayStorage<>()));
@@ -84,6 +85,9 @@ public class MatrixOperationsTest {
 //                new Storage2D<>(new ArrayStorage<>(), new ArrayStorage<>()));
 
         final Matrix A_B = A.multiply(B);
+
+        System.out.println("\n =\n"+A_B.pretty());
+
         assertThat(A_B.getRows(), is(2));
         assertThat(A_B.getCols(), is(2));
         assertThat(A_B.get(0,0), is(58.0));
@@ -93,12 +97,77 @@ public class MatrixOperationsTest {
     }
 
     @Test
+    public void rowSetTest() {
+        final AtomicInteger seq = new AtomicInteger(N*M);
+        final Matrix A = new Matrix(M,N, mkStorage.get())
+                .initialize(seq::getAndDecrement);
+
+        System.out.println(A.pretty());
+        final Storage<Double> row = A.getRow(0);
+        row.setRange(0, 1.0, N);
+        System.out.println(A.pretty());
+
+        for (int i = 0; i < N; i++) {
+            assertThat(A.get(0, i), is(1.0));
+        }
+    }
+
+    @Test
+    public void colSetTest() {
+        final AtomicInteger seq = new AtomicInteger(N*M);
+        final Matrix A = new Matrix(M, N, mkStorage.get())
+                .initialize(seq::getAndDecrement);
+
+        System.out.println(A.pretty());
+        final Storage<Double> colS = A.getCol(1);
+        colS.setRange(0, 10.0, M);
+        System.out.println(A.pretty());
+
+        int v = N*M;
+        for (int row = 0; row < M; row++) {
+            assertThat(A.get(row, 0), is(1.0*v--));
+            assertThat(A.get(row, 1), is(10.0)); v--;
+            assertThat(A.get(row, 2), is(1.0*v--));
+        }
+    }
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void rowAssertionTest() {
+        //create an NxN identity matrix:
+        final Matrix A = Matrix.identity(N, mkStorage.get());
+        // we're trying to shift a value outside the allowed range;
+        // this must fail:
+        System.out.println(A.pretty());
+        A
+                .getRow(2)
+                .set(N, 10.0);
+    }
+
+    @Test
+    public void rowSortTest() {
+        final AtomicInteger seq = new AtomicInteger(N*M);
+        final Matrix A = new Matrix(M, N, mkStorage.get())
+                .initialize(seq::getAndDecrement);
+
+        System.out.println(A.pretty());
+        final Sequence<Double> row = new Sequence<>(A.getRow(0));
+        Collections.sort(row);
+        System.out.println(A.pretty());
+        System.out.println(A.storage.getClass());
+
+        for (int i = 0; i < N; i++) {
+            assertThat(A.get(0, i), is(4.0 + i));
+            assertThat(A.get(1, i), is(3.0 - i));
+        }
+    }
+
+    @Test
     public void transpose() {
         final int M = 2;
         final int N = 3;
         final AtomicInteger seq = new AtomicInteger(1);
-        final Matrix emptyMatrix = matrixSupplier.get();
-        final Matrix A = emptyMatrix.initialize(M, N, seq::getAndIncrement);
+        final Matrix A = new Matrix(M, N, mkStorage.get())
+                .initialize(seq::getAndIncrement);
 //        final Matrix A = Matrix.from(M,N, seq::getAndIncrement,
 //                new Storage2D<>(new ArrayStorage<>(), new ArrayStorage<>()));
 
@@ -120,8 +189,7 @@ public class MatrixOperationsTest {
                 8, 1, 6,
                 4, 9, 2,
                 1, 5, 7}).iterator();
-        final Matrix A = Matrix.from(N,N, seq::next,
-                new Storage2D<>(new ArrayStorage<>(), new ArrayStorage<>()));
+        final Matrix A = Matrix.from(N,N, seq::next, mkStorage.get());
         final Matrix[] LU = A.LUDecomposition();
         final Matrix L = LU[0];
         final Matrix U = LU[1];
@@ -150,8 +218,7 @@ public class MatrixOperationsTest {
         final Random random = new Random(12345);
 //        final Iterator<Integer> seq =
 //                new Storage2D<>(ArrayStorage.class));
-        final Matrix A = Matrix.from(N, N, () -> random.nextDouble()*99.0,
-                new Storage2D<>(new ArrayStorage<>(), new ArrayStorage<>()));
+        final Matrix A = Matrix.from(N, N, () -> random.nextDouble()*99.0, mkStorage.get());
         final Matrix[] LU = A.LUDecomposition();
         final Matrix L = LU[0];
         final Matrix U = LU[1];
